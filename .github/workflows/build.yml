@@ -45,24 +45,24 @@ jobs:
       # ====== 让 SO 解压到磁盘（DynamicLibrary.open 需要物理文件） ======
       - name: Enable legacy native lib packaging
         run: |
-          python3 - <<'EOF'
-          import re
+          python3 - <<'PYEOF'
           f = 'android/app/build.gradle'
           s = open(f, encoding='utf-8').read()
-          block = '''    packagingOptions {
-        jniLibs {
-            useLegacyPackaging = true
-        }
-    }
-'''
+          block = (
+              '    packagingOptions {\n'
+              '        jniLibs {\n'
+              '            useLegacyPackaging = true\n'
+              '        }\n'
+              '    }\n'
+          )
           if 'useLegacyPackaging' not in s:
               s = s.replace('android {', 'android {\n' + block, 1)
               open(f, 'w', encoding='utf-8').write(s)
               print('useLegacyPackaging injected')
           else:
               print('already set')
-          EOF
-          grep -n 'useLegacyPackaging' android/app/build.gradle
+          PYEOF
+          grep -n 'useLegacyPackaging' android/app/build.gradle || true
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -95,7 +95,7 @@ jobs:
           done
           cat /tmp/hashes.txt || echo "NO HASHES"
 
-      # ====== 编译 libcore.so（API 端点构造 + 域名池 + token 解混淆 + 完整性校验） ======
+      # ====== 编译 libverify.so（静态链接 libstdc++，注入 hash） ======
       - name: Build native core
         run: |
           set -e
