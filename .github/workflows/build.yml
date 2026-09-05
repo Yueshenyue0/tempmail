@@ -96,7 +96,7 @@ jobs:
             OUT="android/app/src/main/jniLibs/$abi"
             mkdir -p "$OUT"
             "$CXX" -std=c++11 -shared -fPIC -O2 \
-              -DEXPECTED_LIBAPP_SHA256="$hash" \
+              -DEXPECTED_LIBAPP_SHA256=\"$hash\" \
               -o "$OUT/libverify.so" lib/native/verify.cpp
             echo "built $OUT/libverify.so"
           done < /tmp/hashes.txt
