@@ -186,6 +186,16 @@ class AboutPage extends StatelessWidget {
             child: Text('作者: eri',
                 style: Theme.of(context).textTheme.headlineSmall),
           ),
+          const SizedBox(height: 8),
+          Center(
+            child: Builder(builder: (_) {
+              final v = NativeCore.instance.nativeVersion();
+              return Text(
+                v == null ? 'native core: 未加载（降级模式）' : 'native core: v$v',
+                style: Theme.of(context).textTheme.bodySmall,
+              );
+            }),
+          ),
           const SizedBox(height: 24),
           Card(
             child: Padding(

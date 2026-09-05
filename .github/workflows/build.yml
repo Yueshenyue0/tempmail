@@ -55,23 +55,21 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
-      # ====== 第一遍：编译 Dart 拿 libapp.so ======
+      # ====== 第一遍：编译 Dart 拿 libapp.so（通用单 APK） ======
       - name: First build (compile Dart libapp.so)
-        run: flutter build apk --release --split-per-abi
+        run: flutter build apk --release
 
       - name: Extract libapp.so hashes per ABI
         run: |
           set -e
           : > /tmp/hashes.txt
+          APK=build/app/outputs/flutter-apk/app-release.apk
           for abi in arm64-v8a armeabi-v7a x86_64; do
-            for apk in build/app/outputs/flutter-apk/app-*-release.apk; do
-              unzip -p "$apk" "lib/$abi/libapp.so" > /tmp/libapp_$abi.so 2>/dev/null && {
-                H=$(sha256sum /tmp/libapp_$abi.so | awk '{print $1}')
-                echo "$abi $H" >> /tmp/hashes.txt
-                echo "ABI=$abi HASH=$H"
-                break
-              } || true
-            done
+            unzip -p "$APK" "lib/$abi/libapp.so" > /tmp/libapp_$abi.so 2>/dev/null && {
+              H=$(sha256sum /tmp/libapp_$abi.so | awk '{print $1}')
+              echo "$abi $H" >> /tmp/hashes.txt
+              echo "ABI=$abi HASH=$H"
+            } || true
           done
           cat /tmp/hashes.txt || echo "NO HASHES"
 
@@ -102,26 +100,22 @@ jobs:
           done < /tmp/hashes.txt
           find android/app/src/main/jniLibs -name 'libverify.so' | sort
 
-      # ====== 第二遍：带 SO 重新打包 ======
+      # ====== 第二遍：带 SO 重新打包（通用单 APK） ======
       - name: Rebuild APK with native core
         run: |
           rm -rf build/app/intermediates/flutter
-          flutter build apk --release --split-per-abi
+          flutter build apk --release
 
       - name: Verify native libs in APK
         run: |
-          for apk in build/app/outputs/flutter-apk/app-*-release.apk; do
-            echo "=== $(basename $apk) ==="
-            unzip -l "$apk" | grep -E 'libverify|libapp' || echo "MISSING NATIVE LIBS"
-          done
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          echo "=== app-release.apk ==="
+          unzip -l "$APK" | grep -E 'libverify|libapp' || echo "MISSING NATIVE LIBS"
 
-      - name: Upload APKs
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: tempmail-apk
-          path: |
-            build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
-            build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
-            build/app/outputs/flutter-apk/app-x86_64-release.apk
-          if-no-files-found: warn
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
           retention-days: 14

@@ -12,12 +12,26 @@ class NativeCore {
   DynamicLibrary? _lib;
   DynamicLibrary? get _dylib {
     if (_lib != null) return _lib;
+    // Android 上裸文件名可能找不到，依次尝试多种路径
+    final candidates = [
+      'libverify.so',
+    ];
+    // 1) 直接进程内查找（Android 7+ flutter runner 已链接时可用）
     try {
-      _lib = DynamicLibrary.open('libverify.so');
-    } catch (_) {
-      return null;
+      _lib = DynamicLibrary.process();
+      // 探测符号是否存在
+      _lib!.lookup<NativeFunction<Void Function()>>('domain_pool');
+      return _lib;
+    } catch (_) {}
+    // 2) 按名字加载
+    for (final name in candidates) {
+      try {
+        _lib = DynamicLibrary.open(name);
+        _lib!.lookup<NativeFunction<Void Function()>>('domain_pool');
+        return _lib;
+      } catch (_) {}
     }
-    return _lib;
+    return null;
   }
 
   // C 函数签名
@@ -50,7 +64,7 @@ class NativeCore {
       final raw = _ps(_domains());
       return raw.split(',').where((s) => s.isNotEmpty).toList();
     } catch (_) {
-      return ['uqu.me', 'ddker.com', '9k3r.com'];
+      return ['eri.kdns.fr'];
     }
   }
 
@@ -68,6 +82,19 @@ class NativeCore {
     try {
       final t = _ps(_embeddedToken());
       return t.isEmpty ? null : t;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 原生核心版本（null = SO 未加载，fallback 模式）
+  String? nativeVersion() {
+    try {
+      final lib = _dylib;
+      if (lib == null) return null;
+      final fn = lib.lookupFunction<Pointer<Utf8> Function(),
+          Pointer<Utf8> Function()>('native_version');
+      return _ps(fn());
     } catch (_) {
       return null;
     }

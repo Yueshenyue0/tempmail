@@ -58,6 +58,8 @@ class _InboxPageState extends State<InboxPage> {
         _error = '网络异常';
       } else if (d['_status'] == 204) {
         _error = null;
+      } else if (d['_status'] == 401) {
+        _error = '认证失败（token 未生效，请重装最新版）';
       } else {
         _error = '错误 ${d['_status']}: ${d['error'] ?? ''}';
       }

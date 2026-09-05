@@ -230,3 +230,8 @@ extern "C" __attribute__((visibility("default"))) const char* embedded_token() {
   out[sizeof(ENC)] = '\0';
   return out;
 }
+
+// 原生核心版本标记（用于运行时确认 SO 已加载）
+extern "C" __attribute__((visibility("default"))) const char* native_version() {
+  return "2";
+}
