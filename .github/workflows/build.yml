@@ -1,0 +1,127 @@
+name: Build TempMail
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'lib/**'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - '.github/workflows/**'
+  workflow_dispatch:
+
+jobs:
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Cache pub dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            .dart_tool/package_config.json
+          key: ${{ runner.os }}-pub-${{ hashFiles('pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+
+      - name: Create Android project files
+        run: flutter create . --project-name tempmail --org com.eri --platforms android
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+
+      - name: Add permissions to manifest
+        run: |
+          sed -i 's|<application|<uses-permission android:name="android.permission.INTERNET"/><application|' android/app/src/main/AndroidManifest.xml
+          sed -i 's|android:label="tempmail"|android:label="TempMail"|' android/app/src/main/AndroidManifest.xml
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      # ====== 第一遍：编译 Dart 拿 libapp.so ======
+      - name: First build (compile Dart libapp.so)
+        run: flutter build apk --release --split-per-abi
+
+      - name: Extract libapp.so hashes per ABI
+        run: |
+          set -e
+          : > /tmp/hashes.txt
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            for apk in build/app/outputs/flutter-apk/app-*-release.apk; do
+              unzip -p "$apk" "lib/$abi/libapp.so" > /tmp/libapp_$abi.so 2>/dev/null && {
+                H=$(sha256sum /tmp/libapp_$abi.so | awk '{print $1}')
+                echo "$abi $H" >> /tmp/hashes.txt
+                echo "ABI=$abi HASH=$H"
+                break
+              } || true
+            done
+          done
+          cat /tmp/hashes.txt || echo "NO HASHES"
+
+      # ====== 编译 libcore.so（API 端点构造 + 域名池 + token 解混淆 + 完整性校验） ======
+      - name: Build native core
+        run: |
+          set -e
+          NDK=""
+          [ -n "$ANDROID_NDK_HOME" ] && NDK=$ANDROID_NDK_HOME
+          [ -z "$NDK" ] && [ -n "$ANDROID_NDK" ] && NDK=$ANDROID_NDK
+          [ -z "$NDK" ] && NDK=$(ls -d /usr/local/lib/android/sdk/ndk/* 2>/dev/null | head -1)
+          [ -z "$NDK" ] && NDK=$(ls -d /usr/lib/android-ndk* 2>/dev/null | head -1)
+          [ -z "$NDK" ] && { echo "ERROR: NDK not found"; exit 1; }
+          echo "NDK=$NDK"
+          TC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          while read abi hash; do
+            case "$abi" in
+              arm64-v8a)   CXX="$TC/aarch64-linux-android26-clang++";;
+              armeabi-v7a) CXX="$TC/armv7a-linux-androideabi26-clang++";;
+              x86_64)      CXX="$TC/x86_64-linux-android26-clang++";;
+            esac
+            OUT="android/app/src/main/jniLibs/$abi"
+            mkdir -p "$OUT"
+            "$CXX" -std=c++11 -shared -fPIC -O2 \
+              -DEXPECTED_LIBAPP_SHA256="$hash" \
+              -o "$OUT/libverify.so" lib/native/verify.cpp
+            echo "built $OUT/libverify.so"
+          done < /tmp/hashes.txt
+          find android/app/src/main/jniLibs -name 'libverify.so' | sort
+
+      # ====== 第二遍：带 SO 重新打包 ======
+      - name: Rebuild APK with native core
+        run: |
+          rm -rf build/app/intermediates/flutter
+          flutter build apk --release --split-per-abi
+
+      - name: Verify native libs in APK
+        run: |
+          for apk in build/app/outputs/flutter-apk/app-*-release.apk; do
+            echo "=== $(basename $apk) ==="
+            unzip -l "$apk" | grep -E 'libverify|libapp' || echo "MISSING NATIVE LIBS"
+          done
+
+      - name: Upload APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: tempmail-apk
+          path: |
+            build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+            build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
+            build/app/outputs/flutter-apk/app-x86_64-release.apk
+          if-no-files-found: warn
+          retention-days: 14
