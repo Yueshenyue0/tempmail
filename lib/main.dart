@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'mail_api.dart';
 import 'pages/generator_page.dart';
 import 'pages/inbox_page.dart';
@@ -53,6 +54,47 @@ class _HomePageState extends State<HomePage> {
       _token = token;
       _addr = addr;
     });
+    _maybeDonateDialog();
+  }
+
+  /// 第 3 次及以后每次启动弹捐赠提示
+  Future<void> _maybeDonateDialog() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      final launches = sp.getInt('tm_launch_count') ?? 0;
+      await sp.setInt('tm_launch_count', launches + 1);
+      if (launches + 1 < 3) return;
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('希望可以给作者捐赠'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('开发不易，如果这个工具帮到了你，可以考虑请作者喝一杯'),
+              const SizedBox(height: 16),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.asset(
+                  'assets/donate_qr.png',
+                  width: 200,
+                  fit: BoxFit.contain,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('下次再说'),
+            ),
+          ],
+        ),
+      );
+    } catch (_) {
+      // 弹窗失败静默忽略
+    }
   }
 
   void _setAddress(String addr) {
@@ -67,18 +109,13 @@ class _HomePageState extends State<HomePage> {
         title: Text(_addr ?? 'TempMail'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.settings),
-            onPressed: () async {
-              await Navigator.push(context, MaterialPageRoute(
-                builder: (_) => SettingsPage(
-                  token: _token,
-                  onTokenSaved: (t) {
-                    setState(() => _token = t);
-                  },
-                ),
-              ));
-              final token = await MailApi.instance.loadToken();
-              if (mounted) setState(() => _token = token);
+            icon: const Icon(Icons.info_outline),
+            tooltip: '关于',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const AboutPage()),
+              );
             },
           ),
         ],

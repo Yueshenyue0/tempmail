@@ -38,6 +38,9 @@ class MailApi {
   String get domainPool => NativeCore.instance.domainPool().join(',');
 
   Future<String?> loadToken() async {
+    // 优先：SO 内嵌 token；其次：用户设置里存的
+    final embedded = NativeCore.instance.embeddedToken();
+    if (embedded != null && embedded.isNotEmpty) return embedded;
     try {
       final sp = await SharedPreferences.getInstance();
       final masked = sp.getString('tm_token_masked');

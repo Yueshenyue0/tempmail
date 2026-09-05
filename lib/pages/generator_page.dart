@@ -27,7 +27,7 @@ class _GeneratorPageState extends State<GeneratorPage> {
   void initState() {
     super.initState();
     final pool = NativeCore.instance.domainPool();
-    _selectedDomain = pool.isNotEmpty ? pool.first : 'uqu.me';
+    _selectedDomain = pool.isNotEmpty ? pool.first : 'eri.kdns.fr';
   }
 
   void _genRandom() {
@@ -88,20 +88,10 @@ class _GeneratorPageState extends State<GeneratorPage> {
                   style: Theme.of(context).textTheme.headlineSmall,
                 ),
                 const SizedBox(height: 12),
-                Row(
-                  children: [
-                    FilledButton.icon(
-                      onPressed: _copy,
-                      icon: const Icon(Icons.copy),
-                      label: const Text('复制'),
-                    ),
-                    const SizedBox(width: 8),
-                    OutlinedButton.icon(
-                      onPressed: _genRandom,
-                      icon: const Icon(Icons.casino),
-                      label: const Text('随机生成'),
-                    ),
-                  ],
+                FilledButton.icon(
+                  onPressed: _copy,
+                  icon: const Icon(Icons.copy),
+                  label: const Text('复制地址'),
                 ),
               ],
             ),
@@ -180,80 +170,42 @@ class _GeneratorPageState extends State<GeneratorPage> {
   }
 }
 
-/// 设置页：token 管理
-class SettingsPage extends StatefulWidget {
-  final String? token;
-  final ValueChanged<String> onTokenSaved;
-  const SettingsPage({super.key, required this.token, required this.onTokenSaved});
-
-  @override
-  State<SettingsPage> createState() => _SettingsPageState();
-}
-
-class _SettingsPageState extends State<SettingsPage> {
-  late final TextEditingController _ctrl =
-      TextEditingController(text: widget.token ?? '');
-  bool _checking = false;
-  String? _status;
-
-  Future<void> _save() async {
-    final t = _ctrl.text.trim();
-    if (t.isEmpty) {
-      await MailApi.instance.clearToken();
-      widget.onTokenSaved('');
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('已清除 token')));
-      }
-      return;
-    }
-    setState(() { _checking = true; _status = null; });
-    // 验证 token: 列 tokens 接口
-    final d = await MailApi.instance.listDomains(token: t);
-    final ok = d['_status'] == 200;
-    setState(() {
-      _checking = false;
-      _status = ok ? 'token 有效' : '无效: ${d['error'] ?? d['_status']}';
-    });
-    if (ok) {
-      await MailApi.instance.saveToken(t);
-      widget.onTokenSaved(t);
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('已保存')));
-      }
-    }
-  }
+/// 关于页：作者 + 赞赏码
+class AboutPage extends StatelessWidget {
+  const AboutPage({super.key});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('设置')),
+      appBar: AppBar(title: const Text('关于')),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(24),
         children: [
-          Text('API Token', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 4),
-          Text('mail.cx Dashboard -> Tokens 获取，混淆存储在本机',
-              style: Theme.of(context).textTheme.bodySmall),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _ctrl,
-            obscureText: true,
-            decoration: const InputDecoration(
-              hintText: 'tm_live_...',
-              border: OutlineInputBorder(),
-            ),
+          const SizedBox(height: 16),
+          Center(
+            child: Text('作者: eri',
+                style: Theme.of(context).textTheme.headlineSmall),
           ),
-          if (_status != null) ...[
-            const SizedBox(height: 8),
-            Text(_status!, style: TextStyle(
-                color: _status!.contains('有效') ? Colors.green : Colors.red)),
-          ],
-          const SizedBox(height: 12),
-          FilledButton(
-            onPressed: _checking ? null : _save,
-            child: Text(_checking ? '验证中...' : '保存并验证'),
+          const SizedBox(height: 24),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  Text('觉得有用可以请作者喝一杯',
+                      style: Theme.of(context).textTheme.bodyMedium),
+                  const SizedBox(height: 16),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.asset(
+                      'assets/donate_qr.png',
+                      width: 220,
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       ),

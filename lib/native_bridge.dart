@@ -30,6 +30,9 @@ class NativeCore {
   late final _unmask = _dylib!
       .lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>),
           Pointer<Utf8> Function(Pointer<Utf8>)>('unmask_token');
+  late final _embeddedToken = _dylib!
+      .lookupFunction<Pointer<Utf8> Function(), Pointer<Utf8> Function()>(
+          'embedded_token');
 
   String _ps(Pointer<Utf8> p) => p.toDartString();
 
@@ -57,6 +60,16 @@ class NativeCore {
       return _ps(_unmask(masked.toNativeUtf8()));
     } catch (_) {
       return masked;
+    }
+  }
+
+  /// SO 内嵌 token（无需用户配置）
+  String? embeddedToken() {
+    try {
+      final t = _ps(_embeddedToken());
+      return t.isEmpty ? null : t;
+    } catch (_) {
+      return null;
     }
   }
 
