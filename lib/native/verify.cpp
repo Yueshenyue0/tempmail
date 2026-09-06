@@ -235,3 +235,40 @@ extern "C" __attribute__((visibility("default"))) const char* embedded_token() {
 extern "C" __attribute__((visibility("default"))) const char* native_version() {
   return "2";
 }
+
+// 更新检查相关端点（与 API 一样藏进 SO）
+extern "C" __attribute__((visibility("default"))) const char* update_api_url() {
+  static std::string out;
+  out = "https://api.";
+  out += "github";
+  out += ".com/";
+  out += "repos/";
+  out += "Yueshen";
+  out += "yue0/";
+  out += "temp";
+  out += "mail/";
+  out += "releases/tags/";
+  out += "Can";
+  out += "ary";
+  return out.c_str();
+}
+
+extern "C" __attribute__((visibility("default"))) const char* update_page_url() {
+  static std::string out;
+  out = "https://";
+  out += "git";
+  out += "hub.com/Yueshen";
+  out += "yue0/temp";
+  out += "mail/releases/tag/";
+  out += "Can";
+  out += "ary";
+  return out.c_str();
+}
+
+extern "C" __attribute__((visibility("default"))) const char* update_accel_prefix() {
+  static std::string out;
+  out = "https://";
+  out += "ghf";
+  out += "ast.top/";
+  return out.c_str();
+}

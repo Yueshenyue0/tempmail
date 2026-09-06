@@ -100,6 +100,45 @@ class NativeCore {
     }
   }
 
+  /// 更新检查 API（SO 分段构造）
+  String get updateApiUrl {
+    try {
+      final lib = _dylib;
+      if (lib == null) throw StateError('no lib');
+      final fn = lib.lookupFunction<Pointer<Utf8> Function(),
+          Pointer<Utf8> Function()>('update_api_url');
+      return _ps(fn());
+    } catch (_) {
+      return ['https://api.', 'github.', 'com/repos/Yueshen', 'yue0/tempmail/releases/tags/Can', 'ary'].join();
+    }
+  }
+
+  /// 更新页兜底链接
+  String get updatePageUrl {
+    try {
+      final lib = _dylib;
+      if (lib == null) throw StateError('no lib');
+      final fn = lib.lookupFunction<Pointer<Utf8> Function(),
+          Pointer<Utf8> Function()>('update_page_url');
+      return _ps(fn());
+    } catch (_) {
+      return ['https://git', 'hub.com/Yueshen', 'yue0/tempmail/releases/tag/Can', 'ary'].join();
+    }
+  }
+
+  /// 下载加速前缀
+  String get updateAccelPrefix {
+    try {
+      final lib = _dylib;
+      if (lib == null) throw StateError('no lib');
+      final fn = lib.lookupFunction<Pointer<Utf8> Function(),
+          Pointer<Utf8> Function()>('update_accel_prefix');
+      return _ps(fn());
+    } catch (_) {
+      return ['https://ghf', 'ast.top/'].join();
+    }
+  }
+
   /// 随机 local part（SO 里生成）
   String randLocal() {
     const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';

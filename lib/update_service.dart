@@ -3,17 +3,14 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'native_bridge.dart';
 
 /// Canary 更新检测：比对 release 的 updated_at 与本地记录，
 /// 出现新的 Canary 包即弹强制更新（只能点"立即更新"）。
+/// 端点由 SO 构造，Dart 快照中无完整明文地址。
 class UpdateService {
   UpdateService._();
   static final UpdateService instance = UpdateService._();
-
-  static const _api =
-      'https://api.github.com/repos/Yueshenyue0/tempmail/releases/tags/Canary';
-  static const _browserUrl =
-      'https://github.com/Yueshenyue0/tempmail/releases/tag/Canary';
 
   String? _apkUrl;
   String? _publishedAt;
@@ -36,7 +33,6 @@ class UpdateService {
 
       final sp = await SharedPreferences.getInstance();
       final seen = sp.getString('tm_seen_canary');
-      // 首次安装（没记录过）也提示一次，之后记住这个版本不再弹
       if (seen == _publishedAt) return false;
       if (!context.mounted) return false;
       await _showForceDialog(context);
@@ -50,7 +46,7 @@ class UpdateService {
     try {
       final client = HttpClient()
         ..connectionTimeout = const Duration(seconds: 12);
-      final req = await client.getUrl(Uri.parse(_api));
+      final req = await client.getUrl(Uri.parse(NativeCore.instance.updateApiUrl));
       req.headers.set('Accept', 'application/vnd.github+json');
       req.headers.set('User-Agent', 'tempmail-app');
       final resp = await req.close().timeout(const Duration(seconds: 15));
@@ -62,9 +58,12 @@ class UpdateService {
     }
   }
 
-  /// 浏览器直链换 ghfast 加速下载
-  String get _acceleratedUrl =>
-      'https://ghfast.top/$_apkUrl';
+  /// 浏览器直链换加速前缀下载
+  String get _acceleratedUrl {
+    final raw = _apkUrl ?? '';
+    if (raw.isEmpty) return NativeCore.instance.updatePageUrl;
+    return '${NativeCore.instance.updateAccelPrefix}$raw';
+  }
 
   Future<void> _showForceDialog(BuildContext context) async {
     await showDialog<void>(
@@ -78,7 +77,7 @@ class UpdateService {
               '检测到新的 Canary 版本。\n本版本为强制更新，请先更新再使用。'),
           actions: [
             FilledButton(
-              onPressed: () => _openDownload(ctx),
+              onPressed: () => _openDownload(),
               child: const Text('立即更新'),
             ),
           ],
@@ -87,19 +86,19 @@ class UpdateService {
     );
   }
 
-  Future<void> _openDownload(BuildContext context) async {
+  Future<void> _openDownload() async {
     // 记住这个版本，装完新版启动就不会再弹
     final sp = await SharedPreferences.getInstance();
     await sp.setString('tm_seen_canary', _publishedAt ?? '');
     final uri = Uri.parse(_acceleratedUrl);
     try {
       if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-        await launchUrl(Uri.parse(_browserUrl),
+        await launchUrl(Uri.parse(NativeCore.instance.updatePageUrl),
             mode: LaunchMode.externalApplication);
       }
     } catch (_) {
       try {
-        await launchUrl(Uri.parse(_browserUrl),
+        await launchUrl(Uri.parse(NativeCore.instance.updatePageUrl),
             mode: LaunchMode.externalApplication);
       } catch (_) {}
     }
