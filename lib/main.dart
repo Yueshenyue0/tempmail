@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'mail_api.dart';
 import 'pages/generator_page.dart';
 import 'pages/inbox_page.dart';
+import 'update_service.dart';
 
 void main() {
   runApp(const TempMailApp());
@@ -54,6 +55,9 @@ class _HomePageState extends State<HomePage> {
       _token = token;
       _addr = addr;
     });
+    // 强制更新检查优先于捐赠弹窗
+    final updating = await UpdateService.instance.checkAndPrompt(context);
+    if (updating || !mounted) return;
     _maybeDonateDialog();
   }
 

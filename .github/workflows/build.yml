@@ -88,8 +88,72 @@ jobs:
 
       - name: Add permissions to manifest
         run: |
-          sed -i 's|<application|<uses-permission android:name="android.permission.INTERNET"/><application|' android/app/src/main/AndroidManifest.xml
+          sed -i 's|<application|<uses-permission android:name="android.permission.INTERNET"/><queries><intent><action android:name="android.intent.action.VIEW"/><data android:scheme="https"/></intent></queries><application|' android/app/src/main/AndroidManifest.xml
           sed -i 's|android:label="tempmail"|android:label="TempMail"|' android/app/src/main/AndroidManifest.xml
+
+      # ====== 固定签名（保证可覆盖安装） ======
+      - name: Setup signing
+        run: |
+          cat > android/key.properties <<EOF
+          storeFile=../key/tempmail.keystore
+          storePassword=tempmail2026
+          keyAlias=tempmail
+          keyPassword=tempmail2026
+          EOF
+          python3 - <<'PYEOF'
+          import os
+          kts = 'android/app/build.gradle.kts'
+          groovy = 'android/app/build.gradle'
+          if os.path.exists(kts):
+              f, is_kts = kts, True
+          elif os.path.exists(groovy):
+              f, is_kts = groovy, False
+          else:
+              raise SystemExit('no build.gradle(.kts)')
+          s = open(f, encoding='utf-8').read()
+          if 'key.properties' in s:
+              print('signing already configured')
+          else:
+              if is_kts:
+                  cfg = (
+                      "import java.util.Properties\\n"
+                      "import java.io.FileInputStream\\n\\n"
+                      "val keystoreProps = Properties().apply {\\n"
+                      "    val f = rootProject.file(\"key.properties\")\\n"
+                      "    if (f.exists()) FileInputStream(f).use { load(it) }\\n"
+                      "}\\n\\n"
+                  )
+                  sign = (
+                      "    signingConfigs {\\n"
+                      "        create(\"release\") {\\n"
+                      "            storeFile = file(keystoreProps[\"storeFile\"] as String)\\n"
+                      "            storePassword = keystoreProps[\"storePassword\"] as String\\n"
+                      "            keyAlias = keystoreProps[\"keyAlias\"] as String\\n"
+                      "            keyPassword = keystoreProps[\"keyPassword\"] as String\\n"
+                      "        }\\n"
+                      "    }\\n"
+                  )
+                  rel = 'signingConfig = signingConfigs.getByName(\"release\")\\n'
+              else:
+                  cfg = ''
+                  sign = (
+                      "    signingConfigs {\\n"
+                      "        release {\\n"
+                      "            storeFile file(keystoreProps['storeFile'])\\n"
+                      "            storePassword keystoreProps['storePassword']\\n"
+                      "            keyAlias keystoreProps['keyAlias']\\n"
+                      "            keyPassword keystoreProps['keyPassword']\\n"
+                      "        }\\n"
+                      "    }\\n"
+                  )
+                  rel = "signingConfig signingConfigs.release\\n"
+              if is_kts and not s.startswith('import '):
+                  s = cfg + s
+              s = s.replace('android {', 'android {\\n' + sign, 1)
+              s = s.replace('buildTypes {', 'buildTypes {\\n        release {\\n            ' + rel.strip() + '\\n        }', 1) if 'release {' not in s.split('buildTypes {')[1][:80] else s
+              open(f, 'w', encoding='utf-8').write(s)
+              print('signing injected into', f)
+          PYEOF
 
       - name: Get dependencies
         run: flutter pub get
@@ -158,3 +222,17 @@ jobs:
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
           retention-days: 14
+
+      # ====== 发布到 Canary release（每次 main 构建成功即覆盖上传） ======
+      - name: Release to Canary
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: Canary
+          name: Canary
+          body: |
+            最新 Canary 构建（commit ${{ github.sha }}）
+            构建时间 ${{ github.event.head_commit.timestamp }}
+          files: build/app/outputs/flutter-apk/app-release.apk
+          overwrite_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
