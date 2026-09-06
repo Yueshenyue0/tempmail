@@ -160,7 +160,7 @@ jobs:
 
       # ====== 第一遍：编译 Dart 拿 libapp.so（通用单 APK） ======
       - name: First build (compile Dart libapp.so)
-        run: flutter build apk --release
+        run: flutter build apk --release --obfuscate --split-debug-info=build/symbols
 
       - name: Extract libapp.so hashes per ABI
         run: |
@@ -196,7 +196,7 @@ jobs:
             esac
             OUT="android/app/src/main/jniLibs/$abi"
             mkdir -p "$OUT"
-            "$CXX" -std=c++11 -shared -fPIC -O2 -static-libstdc++ \
+            "$CXX" -std=c++11 -shared -fPIC -O2 -static-libstdc++ -fvisibility=hidden -s \
               -DEXPECTED_LIBAPP_SHA256=\"$hash\" \
               -o "$OUT/libverify.so" lib/native/verify.cpp
             echo "built $OUT/libverify.so"
@@ -207,7 +207,7 @@ jobs:
       - name: Rebuild APK with native core
         run: |
           rm -rf build/app/intermediates/flutter
-          flutter build apk --release
+          flutter build apk --release --obfuscate --split-debug-info=build/symbols
 
       - name: Verify native libs in APK
         run: |

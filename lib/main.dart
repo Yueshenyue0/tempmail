@@ -4,6 +4,7 @@ import 'mail_api.dart';
 import 'pages/generator_page.dart';
 import 'pages/inbox_page.dart';
 import 'update_service.dart';
+import 'rasp_guard.dart';
 
 void main() {
   runApp(const TempMailApp());
@@ -48,6 +49,8 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _bootstrap() async {
+    // RASP 最先初始化（root/hook/重打包防护）
+    RaspGuard.init();
     final token = await MailApi.instance.loadToken();
     final addr = await MailApi.instance.loadAddress();
     if (!mounted) return;
