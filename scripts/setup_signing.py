@@ -24,30 +24,21 @@ def main():
         return
 
     if is_kts:
-        header = (
-            'import java.util.Properties\n'
-            'import java.io.FileInputStream\n'
-            '\n'
-            'val keystoreProps = java.util.Properties().apply {\n'
-            '    val pf = rootProject.file("key.properties")\n'
-            '    if (pf.exists()) java.io.FileInputStream(pf).use { load(it) }\n'
-            '}\n'
-            '\n'
-        )
+        header = ''
         sign_block = (
             '    signingConfigs {\n'
             '        create("release") {\n'
-            '            storeFile = file(keystoreProps.getProperty("storeFile"))\n'
-            '            storePassword = keystoreProps.getProperty("storePassword")\n'
-            '            keyAlias = keystoreProps.getProperty("keyAlias")\n'
-            '            keyPassword = keystoreProps.getProperty("keyPassword")\n'
+            '            storeFile = file("../key/tempmail.keystore")\n'
+            '            storePassword = "tempmail2026"\n'
+            '            keyAlias = "tempmail"\n'
+            '            keyPassword = "tempmail2026"\n'
             '        }\n'
             '    }\n'
         )
         rel_line = '            signingConfig = signingConfigs.getByName("release")\n'
         # buildTypes 里插入/修正 release 块的签名
         if 'signingConfig = signingConfigs.getByName("debug")' in s:
-            # Flutter 模板默认 debug 签名 → 替换为 release 签名
+            # Flutter 模板默认 debug 签名 → 替换为 release 签名（不再插入新块）
             s = s.replace(
                 'signingConfig = signingConfigs.getByName("debug")',
                 'signingConfig = signingConfigs.getByName("release")')
