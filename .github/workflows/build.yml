@@ -85,43 +85,9 @@ jobs:
 
       - name: Add permissions to manifest
         run: |
-          sed -i 's|<application|<uses-permission android:name="android.permission.INTERNET"/><uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/><queries><intent><action android:name="android.intent.action.VIEW"/><data android:scheme="https"/></intent></queries><application|' android/app/src/main/AndroidManifest.xml
-          sed -i 's|android:label="tempmail"|android:label="TempMail"|' android/app/src/main/AndroidManifest.xml
-          python3 - <<'PYEOF'
-          # 注入 ota_update 的 FileProvider + InstallResultReceiver
-          f = 'android/app/src/main/AndroidManifest.xml'
-          s = open(f, encoding='utf-8').read()
-          if 'OtaUpdateFileProvider' not in s:
-              provider = '''<provider
-                android:name="sk.fourq.otaupdate.OtaUpdateFileProvider"
-                android:authorities="${applicationId}.ota_update_provider"
-                android:exported="false"
-                android:grantUriPermissions="true">
-                <meta-data
-                    android:name="android.support.FILE_PROVIDER_PATHS"
-                    android:resource="@xml/filepaths" />
-            </provider>
-            <receiver android:name="sk.fourq.otaupdate.InstallResultReceiver" android:exported="false">
-                <intent-filter>
-                    <action android:name="${applicationId}.ACTION_INSTALL_COMPLETE"/>
-                </intent-filter>
-            </receiver>
-            '''
-              s = s.replace('</application>', provider + '</application>', 1)
-              open(f, 'w', encoding='utf-8').write(s)
-              print('ota_update manifest entries injected')
-          else:
-              print('already there')
-          PYEOF
-          # 创建 filepaths.xml
           mkdir -p android/app/src/main/res/xml
-          cat > android/app/src/main/res/xml/filepaths.xml <<'FP'
-          <?xml version="1.0" encoding="utf-8"?>
-          <paths xmlns:android="http://schemas.android.com/apk/res/android">
-              <files-path name="internal_apk_storage" path="ota_update/"/>
-          </paths>
-          FP
-          echo 'filepaths.xml created'
+          printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<paths xmlns:android="http://schemas.android.com/apk/res/android">' '    <files-path name="internal_apk_storage" path="ota_update/"/>' '    <cache-path name="downloaded_apk" path="/"/>' '</paths>' > android/app/src/main/res/xml/filepaths.xml
+          python3 scripts/inject_manifest.py
 
       # ====== 固定签名（保证可覆盖安装） ======
       - name: Setup signing
