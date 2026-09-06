@@ -118,7 +118,12 @@ class NativeCore {
       buf.asTypedList(32).setAll(0, digest);
       final keyPtr = deriveFn(buf);
       calloc.free(buf);
-      final key = keyPtr.asTypedList(8);
+      // keyPtr 指向 8 字节密钥（以 \0 结尾），转 Uint8List
+      final keyBytes = <int>[];
+      for (var i = 0; i < 8; i++) {
+        keyBytes.add(keyPtr[i]);
+      }
+      final key = Uint8List.fromList(keyBytes);
       // SO 内嵌 token 是 XOR(真token, 真密钥)；此处 key 即解密密钥
       final tokenFn = lib.lookupFunction<Pointer<Utf8> Function(),
           Pointer<Utf8> Function()>('embedded_token');
