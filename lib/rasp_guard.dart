@@ -19,6 +19,12 @@ class RaspGuard {
             Threat.repackaging,
           }),
           monitoringInterval: Duration(seconds: 15),
+          androidConfig: AndroidRaspConfig(
+            // 官方签名证书 SHA-256，重打包检测依赖它
+            signingCertHashes: [
+              'B2:50:00:D1:0B:0C:1D:A5:C7:D7:28:C0:6C:99:22:BE:83:4C:D3:29:41:63:C3:20:55:2F:24:82:5A:9B:AB:51',
+            ],
+          ),
         ),
         onThreatDetected: (threats) {
           // 上报型威胁只打日志，不退出
