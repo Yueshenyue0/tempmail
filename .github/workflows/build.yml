@@ -2,11 +2,6 @@ name: Build TempMail
 on:
   push:
     branches: [ main ]
-    paths:
-      - 'lib/**'
-      - 'pubspec.yaml'
-      - 'pubspec.lock'
-      - '.github/workflows/**'
   workflow_dispatch:
 
 jobs:
