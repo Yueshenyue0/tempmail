@@ -214,6 +214,7 @@ extern "C" __attribute__((visibility("default"))) const char* unmask_token(
 
 // 内嵌 token（XOR 混淆，密钥仅存于此 SO）
 extern "C" __attribute__((visibility("default"))) const char* embedded_token() {
+  // 返回双重加密的 token 密文（Dart 侧用签名派生密钥二次解密）
   static const unsigned char ENC[] = {
   0x2E, 0x51, 0x21, 0xFD, 0x4D, 0xCE, 0x08, 0xAF, 0x63, 0x5F, 0x4C, 0xA7,
   0x47, 0xDA, 0x5E, 0xC6, 0x3C, 0x0C, 0x46, 0xA9, 0x10, 0x8B, 0x0C, 0x95,
@@ -333,5 +334,23 @@ get_decryption_key(jint sigOk) {
     // 签名不匹配：返回错误的密钥（token 解出来就是乱码）
     for (int i = 0; i < 8; i++) key[i] ^= 0xA5;
   }
+  return (const char*)key;
+}
+
+// Dart 传入 sha256(签名DER) 的 32 字节摘要，SO 内比对并派生 token 密钥
+// 返回 8 字节密钥（签名对 -> 真密钥；错 -> 假密钥）
+extern "C" __attribute__((visibility("default"))) const char*
+derive_token_key(const unsigned char* digest32) {
+  if (!digest32) return 0;
+  unsigned char expected[32];
+  for (int i = 0; i < 32; i++) expected[i] = SIG_ENC[i] ^ SIGXOR;
+  unsigned char diff = 0;
+  for (int i = 0; i < 32; i++) diff |= digest32[i] ^ expected[i];
+  static unsigned char key[9];
+  for (int i = 0; i < 8; i++) key[i] = TOKEN_KEY_ENC[i] ^ SIGKEY_XOR;
+  if (diff != 0) {
+    for (int i = 0; i < 8; i++) key[i] ^= 0xA5;
+  }
+  key[8] = 0;
   return (const char*)key;
 }

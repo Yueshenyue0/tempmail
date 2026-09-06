@@ -48,9 +48,11 @@ class MailApi {
   String get domainPool => NativeCore.instance.domainPool().join(',');
 
   Future<String?> loadToken() async {
-    // 优先：SO 内嵌 token；其次：用户设置里存的
-    final embedded = NativeCore.instance.embeddedToken();
-    if (embedded != null && embedded.isNotEmpty) return embedded;
+    // 强链路：签名校验 -> 派生密钥 -> 解密 SO 内嵌 token
+    // 签名不匹配 -> 密钥错 -> 解出乱码 -> 返回 null（API 401）
+    final verified = await NativeCore.instance.computeVerifiedToken();
+    if (verified != null && verified.isNotEmpty) return verified;
+    // 降级：SO 不可用时尝试用户自存的 token
     try {
       final sp = await SharedPreferences.getInstance();
       final masked = sp.getString('tm_token_masked');
