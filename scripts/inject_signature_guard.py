@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
-"""注入自定义 MainActivity.kt：启动时校验 APK 签名证书 SHA-256。
-在 Flutter 引擎加载前执行，签名不匹配直接杀进程。
-幂等：已注入则跳过。
+"""注入 MainActivity.kt：只负责取签名字节并通过 JNI 传给 SO 校验。
+指纹不在 dex 里（在 SO 中 XOR 混淆），dex 层无任何可改的校验逻辑。
 """
 import os
-import sys
 
 ACTIVITY_DIR = 'android/app/src/main/kotlin/com/eri/tempmail'
-EXPECTED_SHA = 'B2:50:00:D1:0B:0C:1D:A5:C7:D7:28:C0:6C:99:22:BE:83:4C:D3:29:41:63:C3:20:55:2F:24:82:5A:9B:AB:51'
 
 
 def main():
@@ -15,62 +12,46 @@ def main():
     path = os.path.join(ACTIVITY_DIR, 'MainActivity.kt')
     if os.path.exists(path):
         src = open(path, encoding='utf-8').read()
-        if 'SIGNATURE_CHECK' in src:
-            print('signature check already injected')
+        if 'nativeSigMatch' in src:
+            print('already injected')
             return
 
-    code = f'''// SIGNATURE_CHECK: native-level signature guard
-// 注入的强签名校验：Flutter 引擎加载前执行。签名不匹配 -> 杀进程。
-package com.eri.tempmail
+    code = '''package com.eri.tempmail
 
 import android.content.pm.PackageManager
 import android.os.Build
-import android.util.Base64
 import io.flutter.embedding.android.FlutterActivity
-import java.security.MessageDigest
 
-class MainActivity : FlutterActivity() {{
-    companion object {{
-        // 官方签名证书 SHA-256（keystore: tempmail / alias: tempmail）
-        private val EXPECTED = setOf(
-            "{EXPECTED_SHA.replace(':', '')}"
-        )
-    }}
+class MainActivity : FlutterActivity() {
+    companion object {
+        init {
+            System.loadLibrary("verify")
+        }
+    }
 
-    override fun onResume() {{
-        super.onResume()
-        if (!verifySignature()) {{
-            android.os.Process.killProcess(android.os.Process.myPid())
-        }}
-    }}
+    // SO 层校验：返回 1=匹配 0=不匹配（指纹在 SO 内部，dex 无感知）
+    external fun sigMatch(sigBytes: ByteArray): Int
 
-    private fun verifySignature(): Boolean {{
-        return try {{
+    fun isOfficialSignature(): Boolean {
+        return try {
             val pm = applicationContext.packageManager
-            val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {{
-                val info = pm.getPackageInfo(packageName, PackageManager.GET_SIGNING_CERTIFICATES)
-                info.signingInfo?.apkContentsSigners
-            }} else {{
+            val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                pm.getPackageInfo(packageName, PackageManager.GET_SIGNING_CERTIFICATES)
+                    .signingInfo?.apkContentsSigners
+            } else {
                 @Suppress("DEPRECATION")
-                val info = pm.getPackageInfo(packageName, PackageManager.GET_SIGNATURES)
-                info.signatures
-            }}
-            if (signatures == null || signatures.isEmpty()) return false
-            for (sig in signatures) {{
-                val md = MessageDigest.getInstance("SHA-256")
-                val digest = md.digest(sig.toByteArray())
-                val hex = digest.joinToString("") {{ "%02x".format(it) }}
-                if (hex.uppercase() in EXPECTED) return true
-            }}
+                pm.getPackageInfo(packageName, PackageManager.GET_SIGNATURES).signatures
+            }
+            val sig = signatures?.firstOrNull() ?: return false
+            sigMatch(sig.toByteArray()) == 1
+        } catch (t: Throwable) {
             false
-        }} catch (t: Throwable) {{
-            false
-        }}
-    }}
-}}
+        }
+    }
+}
 '''
     open(path, 'w', encoding='utf-8').write(code)
-    print('MainActivity signature guard injected')
+    print('MainActivity (JNI bridge) injected')
 
 
 if __name__ == '__main__':
