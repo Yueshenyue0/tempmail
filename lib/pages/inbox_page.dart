@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 import '../mail_api.dart';
 
 /// Tab2: 收件箱（5s 自动刷新 + 卡片列表）
@@ -68,10 +70,9 @@ class _InboxPageState extends State<InboxPage> {
 
   Widget _buildEmailCard(Map<String, dynamic> em) {
     final subject = (em['subject'] as String?) ?? '(无主题)';
-    final from = (em['from_email'] as String?) ?? '?';
+    final fromName = (em['from_name'] as String?) ?? '';
+    final from = fromName.isNotEmpty ? fromName : ((em['from_email'] as String?) ?? '?');
     final preview = ((em['preview_text'] as String?) ?? '').trim();
-    final time = (em['created_at'] as String?) ?? '';
-    final timeShort = time.length > 16 ? time.substring(0, 16) : time;
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       child: ListTile(
@@ -82,8 +83,6 @@ class _InboxPageState extends State<InboxPage> {
         subtitle: Text('$from\n$preview',
             maxLines: 2, overflow: TextOverflow.ellipsis),
         isThreeLine: true,
-        trailing: Text(timeShort,
-            style: Theme.of(context).textTheme.bodySmall),
         onTap: () => _openDetail(em),
       ),
     );
@@ -149,14 +148,22 @@ class _InboxPageState extends State<InboxPage> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) =>
-            EmailDetailPage(emailId: id, token: widget.token),
+        builder: (_) => EmailDetailPage(emailId: id, token: widget.token),
       ),
     );
   }
 }
 
-/// 邮件详情页
+/// 兼容不同字段名的取值
+String? _field(Map<String, dynamic> d, List<String> names) {
+  for (final n in names) {
+    final v = d[n];
+    if (v != null && v.toString().isNotEmpty) return v.toString();
+  }
+  return null;
+}
+
+/// 邮件详情页：WebView 渲染 HTML 正文，完整显示原邮件
 class EmailDetailPage extends StatefulWidget {
   final String emailId;
   final String? token;
@@ -169,6 +176,8 @@ class EmailDetailPage extends StatefulWidget {
 class _EmailDetailPageState extends State<EmailDetailPage> {
   Map<String, dynamic>? _detail;
   String? _error;
+  WebViewController? _webCtrl;
+  bool _useHtmlView = true;
 
   @override
   void initState() {
@@ -184,10 +193,64 @@ class _EmailDetailPageState extends State<EmailDetailPage> {
       if (d['_status'] == 200) {
         _detail = d;
         _error = null;
+        _initWeb(d);
       } else {
         _error = '加载失败: ${d['error'] ?? d['_status']}';
       }
     });
+  }
+
+  void _initWeb(Map<String, dynamic> d) {
+    final html = _field(d, ['html_body', 'html']);
+    final text = _field(d, ['text_body', 'text']);
+    // 决定渲染源：HTML 优先，没有就用 text 包一层
+    String body;
+    if (html != null && html.trim().isNotEmpty) {
+      body = html;
+    } else if (text != null && text.trim().isNotEmpty) {
+      body = '<pre style="white-space:pre-wrap;word-break:break-word;'
+          'font-family:sans-serif;font-size:15px;color:#1a1a1a;margin:0;">'
+          '${_escapeHtml(text)}</pre>';
+    } else {
+      return;
+    }
+    final page = _wrapDocument(d, body);
+    final ctrl = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.disabled)
+      ..setNavigationDelegate(NavigationDelegate(
+        onNavigationRequest: (req) {
+          final url = req.url;
+          // 邮件内链接全部外开浏览器，不在 WebView 内跳转
+          if (url.startsWith('http://') || url.startsWith('https://')) {
+            launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+            return NavigationDecision.prevent;
+          }
+          return NavigationDecision.navigate;
+        },
+      ))
+      ..loadHtmlString(page, baseUrl: 'https://mail.cx');
+    setState(() => _webCtrl = ctrl);
+  }
+
+  static String _escapeHtml(String s) => s
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;');
+
+  /// 给邮件 HTML 包一层适配移动端的样式（宽度自适应、暗色跟随暂不做，邮件原样）
+  static String _wrapDocument(Map<String, dynamic> d, String body) {
+    return '''
+<!doctype html>
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html,body{margin:0;padding:0;background:#ffffff;}
+  body{font-family:sans-serif;-webkit-text-size-adjust:100%;}
+  img{max-width:100%!important;height:auto;}
+  table{max-width:100%!important;}
+  a{color:#1565C0;}
+</style>
+</head><body>$body</body></html>''';
   }
 
   Future<void> _delete() async {
@@ -224,43 +287,80 @@ class _EmailDetailPageState extends State<EmailDetailPage> {
 
   @override
   Widget build(BuildContext context) {
+    final d = _detail;
     return Scaffold(
       appBar: AppBar(
         title: const Text('邮件详情'),
         actions: [
-          IconButton(icon: const Icon(Icons.delete_outline), onPressed: _delete),
+          if (d != null && _webCtrl != null)
+            IconButton(
+              icon: const Icon(Icons.text_fields),
+              tooltip: '纯文本视图',
+              onPressed: () => setState(() => _useHtmlView = !_useHtmlView),
+            ),
+          IconButton(
+              icon: const Icon(Icons.delete_outline), onPressed: _delete),
         ],
       ),
       body: _error != null
           ? Center(child: Text(_error!))
-          : _detail == null
+          : d == null
               ? const Center(child: CircularProgressIndicator())
-              : ListView(
-                  padding: const EdgeInsets.all(16),
+              : Column(
                   children: [
-                    Text(_detail!['subject'] as String? ?? '(无主题)',
-                        style: Theme.of(context).textTheme.titleLarge),
-                    const SizedBox(height: 8),
-                    Text('From: ${_detail!['from_email'] ?? '?'}'),
-                    Text('To: ${_detail!['to_email'] ?? '?'}'),
-                    Text('Time: ${_detail!['created_at'] ?? '?'}'),
-                    const Divider(height: 24),
-                    _buildBody(),
+                    // 头部信息区
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      color: Theme.of(context)
+                          .colorScheme
+                          .surfaceContainerHighest
+                          .withValues(alpha: 0.5),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(_field(d, ['subject']) ?? '(无主题)',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium
+                                  ?.copyWith(fontWeight: FontWeight.w600)),
+                          const SizedBox(height: 6),
+                          Text('From: ${_field(d, ['from', 'from_name', 'from_email']) ?? '?'}',
+                              style: Theme.of(context).textTheme.bodySmall),
+                          Text('To: ${_field(d, ['to', 'to_email']) ?? '?'}',
+                              style: Theme.of(context).textTheme.bodySmall),
+                          Text('Date: ${_field(d, ['date', 'created_at']) ?? '?'}',
+                              style: Theme.of(context).textTheme.bodySmall),
+                        ],
+                      ),
+                    ),
+                    // 正文
+                    Expanded(
+                      child: _useHtmlView && _webCtrl != null
+                          ? WebViewWidget(controller: _webCtrl!)
+                          : _plainTextBody(d),
+                    ),
                   ],
                 ),
     );
   }
 
-  Widget _buildBody() {
-    final text = _detail!['text'] as String?;
-    final html = _detail!['html'] as String?;
+  Widget _plainTextBody(Map<String, dynamic> d) {
+    final text = _field(d, ['text_body', 'text']);
     if (text != null && text.isNotEmpty) {
-      return SelectableText(text);
+      return SingleChildScrollView(
+        padding: const EdgeInsets.all(12),
+        child: SelectableText(text),
+      );
     }
+    final html = _field(d, ['html_body', 'html']);
     if (html != null && html.isNotEmpty) {
-      return SelectableText(_stripHtml(html));
+      return SingleChildScrollView(
+        padding: const EdgeInsets.all(12),
+        child: SelectableText(_stripHtml(html)),
+      );
     }
-    return const Text('（空正文）');
+    return const Center(child: Text('（空正文）'));
   }
 
   static String _stripHtml(String html) {

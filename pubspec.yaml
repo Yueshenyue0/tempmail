@@ -15,6 +15,7 @@ dependencies:
   url_launcher: ^6.3.0
   flutter_rasp: ^7.1.0
   http_certificate_pinning: ^3.0.2
+  webview_flutter: ^4.10.0
 
 dev_dependencies:
   flutter_test:
