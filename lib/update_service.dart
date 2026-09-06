@@ -6,9 +6,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'native_bridge.dart';
 
 /// Canary 应用内更新：
-/// 1. SO 取检查端点（无明文地址）
+/// 1. SO 取检查端点（Dart 快照无明文地址）
 /// 2. 新版本 -> 强制弹窗（不可关闭）
-/// 3. 点更新 -> 应用内下载（进度条）-> 自动触发安装
+/// 3. 点更新 -> 应用内下载（进度条）-> 自动触发系统安装
 class UpdateService {
   UpdateService._();
   static final UpdateService instance = UpdateService._();
@@ -16,11 +16,6 @@ class UpdateService {
   String? _apkUrl;
   String? _publishedAt;
   bool _downloading = false;
-  StateCallback? _uiCallback;
-
-  /// UI 状态回调（由弹窗注册）
-  static void Function(OtaEvent event)? onOtaEvent;
-  static void Function(String error)? onOtaError;
 
   /// 启动检查。返回 true 表示弹了强制更新框。
   Future<bool> checkAndPrompt(BuildContext context) async {
@@ -70,96 +65,89 @@ class UpdateService {
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => const UpdateDialog(),
+      builder: (ctx) => _UpdateDialog(controller: this),
     );
   }
 
-  Future<void> _startInAppUpdate() async {
+  /// 开始应用内下载（由弹窗按钮触发）
+  Future<void> startDownload(void Function(OtaEvent) onEvent,
+      void Function(String) onError) async {
     if (_downloading || _apkUrl == null) return;
     _downloading = true;
+    // 标记已见，装完新版启动不再弹
     final sp = await SharedPreferences.getInstance();
     await sp.setString('tm_seen_canary', _publishedAt ?? '');
     // ghfast 加速直链
     final url = '${NativeCore.instance.updateAccelPrefix}$_apkUrl';
     try {
-      OtaUpdate()
-          .execute(url, destinationFilename: 'tempmail_canary.apk')
-          .listen(
-        (OtaEvent event) {
-          onOtaEvent?.call(event);
-        },
+      OtaUpdate().execute(
+        url,
+        destinationFilename: 'tempmail_canary.apk',
+      ).listen(
+        (OtaEvent event) => onEvent(event),
         onError: (e) {
           _downloading = false;
-          onOtaError?.call(e.toString());
+          onError(e.toString());
         },
         onDone: () => _downloading = false,
+        cancelOnError: true,
       );
     } catch (e) {
       _downloading = false;
-      onOtaError?.call(e.toString());
+      onError(e.toString());
     }
   }
-
-  static void startUpdate() => instance._startInAppUpdate();
 }
 
-typedef StateCallback = void Function();
+// ==================== 更新弹窗 UI（进度条） ====================
 
-/// 更新弹窗 UI：进度条 + 状态展示
-class UpdateDialog extends StatefulWidget {
-  const UpdateDialog({super.key});
+class _UpdateDialog extends StatefulWidget {
+  final UpdateService controller;
+  const _UpdateDialog({required this.controller});
 
   @override
-  State<UpdateDialog> createState() => _UpdateDialogState();
+  State<_UpdateDialog> createState() => _UpdateDialogState();
 }
 
-class _UpdateDialogState extends State<UpdateDialog> {
+class _UpdateDialogState extends State<_UpdateDialog> {
   double _progress = 0;
-  String _statusText = '检测到新的 Canary 版本，必须更新后才能使用';
+  String _statusText = '检测到新的 Canary 版本，必须更新后才能继续使用';
   bool _downloading = false;
   bool _failed = false;
-  String? _error;
 
-  @override
-  void initState() {
-    super.initState();
-    UpdateService.onOtaEvent = (event) {
-      if (!mounted) return;
-      setState(() {
-        final status = event.status.toString();
-        final value = event.value?.toString();
-        if (status.contains('DOWNLOADING')) {
+  void _onEvent(OtaEvent event) {
+    if (!mounted) return;
+    setState(() {
+      switch (event.status) {
+        case OtaStatus.DOWNLOADING:
           _downloading = true;
-          _progress = double.tryParse(value ?? '0') ?? 0;
+          _progress =
+              double.tryParse(event.value ?? '0') ?? 0;
           _statusText = '下载中 ${_progress.toStringAsFixed(0)}%';
-        } else if (status.contains('INSTALLING')) {
+          break;
+        case OtaStatus.INSTALLING:
           _downloading = true;
           _progress = 100;
           _statusText = '下载完成，正在启动安装...';
-        } else if (status.contains('INSTALLATION_DONE')) {
-          _statusText = '安装完成';
-        } else if (status.contains('ERROR')) {
+          break;
+        case OtaStatus.ALREADY_RUNNING_ERROR:
+          break;
+        case OtaStatus.PERMISSION_NOT_GRANTED_ERROR:
           _failed = true;
-          _error = value ?? status;
-          _statusText = '出错';
-        }
-      });
-    };
-    UpdateService.onOtaError = (msg) {
-      if (!mounted) return;
-      setState(() {
-        _failed = true;
-        _error = msg;
-        _statusText = '出错';
-      });
-    };
-  }
-
-  @override
-  void dispose() {
-    UpdateService.onOtaEvent = null;
-    UpdateService.onOtaError = null;
-    super.dispose();
+          _statusText = '未授予安装权限';
+          break;
+        case OtaStatus.DOWNLOAD_ERROR:
+          _failed = true;
+          _statusText = '下载失败，请检查网络';
+          break;
+        case OtaStatus.INTERNAL_ERROR:
+          _failed = true;
+          _statusText = '出错: ${event.value ?? ''}';
+          break;
+        default:
+          break;
+      }
+    });
   }
 
   @override
@@ -182,23 +170,26 @@ class _UpdateDialogState extends State<UpdateDialog> {
                   minHeight: 10,
                 ),
               ),
-            if (_failed) ...[
-              const SizedBox(height: 12),
-              Text(_error ?? '下载失败',
-                  style: const TextStyle(color: Colors.red, fontSize: 12)),
-            ],
           ],
         ),
         actions: [
-          if (!_downloading && !_failed)
-            FilledButton(
-              onPressed: UpdateService.startUpdate,
-              child: const Text('立即更新'),
-            ),
           if (_failed)
             TextButton(
               onPressed: () => exit(0),
               child: const Text('退出应用'),
+            ),
+          if (!_downloading && !_failed)
+            FilledButton(
+              onPressed: () => widget.controller
+                  .startDownload(_onEvent, (msg) {
+                if (mounted) {
+                  setState(() {
+                    _failed = true;
+                    _statusText = '出错: $msg';
+                  });
+                }
+              }),
+              child: const Text('立即更新'),
             ),
         ],
       ),
