@@ -32,12 +32,12 @@ class RaspGuard {
   }
 
   /// 一次性全量扫描（可用于设置页"安全状态"显示）
-  static Future<List<Threat>> scanAll() async {
+  static Future<Set<Threat>> scanAll() async {
     try {
       final result = await FlutterRasp.instance.scanAll();
       return result.detectedThreats;
     } catch (_) {
-      return [];
+      return <Threat>{};
     }
   }
 }
