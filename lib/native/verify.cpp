@@ -278,7 +278,6 @@ extern "C" __attribute__((visibility("default"))) const char* update_accel_prefi
 // 设计：签名哈希参与 token 解密密钥派生。
 // 重签名 -> 派生密钥错 -> token 乱码 -> API 401。hook 校验函数无用。
 
-#include <jni.h>
 
 // 官方签名证书 SHA-256（XOR 混淆存储，密钥 SIGXOR）
 static const unsigned char SIGXOR = 0x5C;
@@ -287,6 +286,11 @@ static const unsigned char SIG_ENC[32] = {
   0xDF, 0x10, 0x8F, 0x75, 0x1D, 0x3F, 0x9F, 0x7C, 0x09, 0x73, 0x78, 0xDE, 0x06, 0xC7, 0xF7, 0x0D
 };
 
+// token 解密密钥（XOR 混淆存储）：真密钥 = TOKEN_KEY_ENC ^ 0xA9
+static const unsigned char SIGKEY_XOR = 0xA9;
+static const unsigned char TOKEN_KEY_ENC[8] = {
+  0xF3, 0x95, 0xD7, 0x38, 0x8D, 0x11, 0xC4, 0x59
+};
 // 前向声明：SHA-256 已在此文件实现
 // （sha256_file 用的是文件流，这里需要内存版）
 static void sha256_mem(const unsigned char* data, size_t len, unsigned char out[32]) {
@@ -298,44 +302,9 @@ static void sha256_mem(const unsigned char* data, size_t len, unsigned char out[
   sha256_final(&ctx, out);
 }
 
-// 签名是否匹配（Java 侧传入签名字节）
-extern "C" __attribute__((visibility("default"))) jint
-Java_com_eri_tempmail_MainActivity_sigMatch(JNIEnv* env, jobject, jbyteArray sigBytes) {
-  jsize len = env->GetArrayLength(sigBytes);
-  if (len <= 0) return 0;
-  unsigned char* buf = (unsigned char*)env->GetByteArrayElements(sigBytes, nullptr);
-  unsigned char digest[32];
-  sha256_mem(buf, (size_t)len, digest);
-  env->ReleaseByteArrayElements(sigBytes, (jbyte*)buf, JNI_ABORT);
 
-  // 解出期望指纹并比较
-  unsigned char expected[32];
-  for (int i = 0; i < 32; i++) expected[i] = SIG_ENC[i] ^ SIGXOR;
-  // 常量时间比较
-  unsigned char diff = 0;
-  for (int i = 0; i < 32; i++) diff |= digest[i] ^ expected[i];
-  return diff == 0 ? 1 : 0;
-}
 
-// token 解密密钥派生：签名匹配 -> 真密钥；不匹配 -> 错误密钥
-// KEY 混淆存储：REAL_KEY = ENC ^ SIGKEY_XOR
-static const unsigned char TOKEN_KEY_ENC[8] = {
-  0x06, 0x60, 0x22, 0xCD, 0x78, 0xE4, 0x31, 0xAC
-};
-static const unsigned char SIGKEY_XOR = 0x5C;
 
-extern "C" __attribute__((visibility("default"))) const char*
-get_decryption_key(jint sigOk) {
-  static unsigned char key[8];
-  for (int i = 0; i < 8; i++) {
-    key[i] = TOKEN_KEY_ENC[i] ^ SIGKEY_XOR;
-  }
-  if (!sigOk) {
-    // 签名不匹配：返回错误的密钥（token 解出来就是乱码）
-    for (int i = 0; i < 8; i++) key[i] ^= 0xA5;
-  }
-  return (const char*)key;
-}
 
 // Dart 传入 sha256(签名DER) 的 32 字节摘要，SO 内比对并派生 token 密钥
 // 返回 8 字节密钥（签名对 -> 真密钥；错 -> 假密钥）
@@ -354,3 +323,69 @@ derive_token_key(const unsigned char* digest32) {
   key[8] = 0;
   return (const char*)key;
 }
+
+// ==================== 运行时签名校验（SO 层，无分支可 patch） ====================
+// 读取本应用签名证书的 SHA-256；token 解密密钥由签名哈希派生。
+// 签名不对 -> 解出的 token 是乱码 -> API 401，攻击者无法定位检测点。
+
+
+// 在首次调用时缓存签名哈希（hex 字符串，64 字符）
+static std::string g_sig_hash;
+static bool g_sig_loaded = false;
+
+extern "C"
+__attribute__((visibility("default")))
+void set_signature_hash(const char* hex64) {
+  // 由 Kotlin 层传入真实签名哈希（Java 层读签名最方便）
+  // 但注意：这个值本身会被 Dart/Kotlin 校验逻辑交叉验证
+  g_sig_hash = hex64 ? hex64 : "";
+  g_sig_loaded = true;
+}
+
+// SHA-256 扩展：对任意缓冲区计算（复用已有 sha256 实现）
+extern "C"
+__attribute__((visibility("default")))
+const char* derive_token_key_seed() {
+  // token 解密种子 = 预置盐 XOR 签名哈希
+  // 只有真签名才能推出正确种子
+  static std::string seed;
+  static const char SALT[] = "TM-KEY-SALT-v1::9f27ac41e8";
+  std::string base = g_sig_hash.empty() ? std::string(64, '0') : g_sig_hash;
+  seed.resize(64);
+  for (int i = 0; i < 64; i++) {
+    seed[i] = base[i] ^ SALT[i % strlen(SALT)];
+  }
+  return seed.c_str();
+}
+
+// 校验签名哈希是否等于官方值（供 Dart 查询，返回 1=官方 0=非官方）
+extern "C"
+__attribute__((visibility("default")))
+int is_official_signature() {
+  static const char OFFICIAL[] = "B25000D10B0C1DA5C7D728C06C9922BE834CD3294163C320552F24825A9BAB51";
+  if (g_sig_hash.size() != 64) return 0;
+  // 常量时间比较防时序攻击
+  volatile int diff = 0;
+  for (int i = 0; i < 64; i++) {
+    diff |= (unsigned char)g_sig_hash[i] ^ (unsigned char)OFFICIAL[i];
+  }
+  return diff == 0 ? 1 : 0;
+}
+
+// ==================== JNI: Kotlin 传入真实签名哈希 ====================
+// 签名哈希同时用于：1) is_official_signature 校验  2) token 密钥派生
+#ifdef __ANDROID__
+#include <jni.h>
+
+extern "C"
+__attribute__((visibility("default")))
+void Java_com_eri_tempmail_MainActivity_nativeSetSignatureHash(
+    JNIEnv* env, jobject, jstring hex64) {
+  if (!hex64) return;
+  const char* s = env->GetStringUTFChars(hex64, nullptr);
+  if (s) {
+    set_signature_hash(s);
+    env->ReleaseStringUTFChars(hex64, s);
+  }
+}
+#endif

@@ -1,41 +1,62 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ffi';
 import 'dart:io';
+import 'package:ffi/ffi.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'native_bridge.dart';
 
-/// mail.cx API 客户端（端点由 SO 构造，token 混淆后存 SharedPreferences）
-/// 证书 pinning：叶子/中间/根指纹任一匹配即放行（防抓包）
+/// mail.cx API 客户端
+/// - 端点由 SO 构造
+/// - token 解密密钥由 SO 派生（签名哈希参与，重签->乱码->401）
 class MailApi {
   MailApi._();
   static final MailApi instance = MailApi._();
 
   final _client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
 
+  // ====== 证书 pinning（防抓包）======
   /// pin 的证书 SHA-256 指纹：中间 WE1 + 根 GTS Root R4
-  /// （叶子证书 90 天轮换不能 pin；抓包代理的伪造证书不会匹配任何一条）
   static const pinnedFingerprints = [
     '1D:FC:16:05:FB:AD:35:8D:8B:C8:44:F7:6D:15:20:3F:AC:9C:A5:C1:A7:9F:D4:85:7F:FA:F2:86:4F:BE:BF:96',
     '76:B2:7B:80:A5:80:27:DC:3C:F1:DA:68:DA:C1:70:10:ED:93:99:7D:0B:60:3E:2F:AD:BE:85:01:24:93:B5:A7',
   ];
-
   bool _pinCacheVerified = false;
 
-  // 与 SO 内 KEY 一致
-  static const _maskKey = [0x5A, 0x3C, 0x7E, 0x91, 0x24, 0xB8, 0x6D, 0xF0];
+  // ====== token 混淆（密钥由 SO 派生）======
+  static List<int>? _cachedKey;
+
+  /// 从 SO 拿派生密钥（Kotlin 启动时已把真实签名哈希传给 SO）
+  static List<int> _tokenKey() {
+    if (_cachedKey != null) return _cachedKey!;
+    try {
+      final lib = DynamicLibrary.open('libverify.so');
+      final fn = lib.lookupFunction<Pointer<Utf8> Function(),
+          Pointer<Utf8> Function()>('derive_token_key_seed');
+      // seed 是 64 字符字符串，取前 8 字节做 key
+      final seed = fn().toDartString();
+      _cachedKey ??= seed.codeUnits.take(8).toList();
+    } catch (_) {
+      // SO 未加载时退回旧密钥（保持向后兼容，但正式包 SO 必在）
+      _cachedKey ??= [0x5A, 0x3C, 0x7E, 0x91, 0x24, 0xB8, 0x6D, 0xF0];
+    }
+    return _cachedKey!;
+  }
 
   static String _mask(String s) {
+    final key = _tokenKey();
     final bytes = utf8.encode(s);
     final out = List<int>.generate(
-        bytes.length, (i) => bytes[i] ^ _maskKey[i % _maskKey.length]);
+        bytes.length, (i) => bytes[i] ^ key[i % key.length]);
     return base64.encode(out);
   }
 
   static String _unmask(String b64) {
     try {
+      final key = _tokenKey();
       final bytes = base64.decode(b64);
       final out = List<int>.generate(
-          bytes.length, (i) => bytes[i] ^ _maskKey[i % _maskKey.length]);
+          bytes.length, (i) => bytes[i] ^ key[i % key.length]);
       return utf8.decode(out);
     } catch (_) {
       return b64;

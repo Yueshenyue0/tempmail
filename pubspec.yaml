@@ -16,7 +16,7 @@ dependencies:
   flutter_rasp: ^7.1.0
   http_certificate_pinning: ^3.0.2
   webview_flutter: ^4.10.0
-  ota_update: ^7.1.0
+  android_package_installer: ^0.0.3
 
 dev_dependencies:
   flutter_test:
