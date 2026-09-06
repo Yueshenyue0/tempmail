@@ -120,8 +120,9 @@ class NativeCore {
       calloc.free(buf);
       // keyPtr 指向 8 字节密钥（以 \0 结尾），转 Uint8List
       final keyBytes = <int>[];
+      final bytePtr = keyPtr.cast<Uint8>();
       for (var i = 0; i < 8; i++) {
-        keyBytes.add(keyPtr[i]);
+        keyBytes.add(bytePtr[i]);
       }
       final key = Uint8List.fromList(keyBytes);
       // SO 内嵌 token 是 XOR(真token, 真密钥)；此处 key 即解密密钥
